@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { Button, Input, Select, Tag } from 'antd'
-import { ArrowUpOutlined } from '@ant-design/icons'
+import { useState, useEffect, useRef } from 'react'
+import { Button, Input, Spin, Typography, message } from 'antd'
+import { ArrowUpOutlined, MessageOutlined } from '@ant-design/icons'
 import Sidebar from '@/components/layout/Sidebar'
+import SessionDrawer from '@/components/SessionDrawer'
+import { chatApi, type Session, type Message } from '@/services/chat'
 
 const SUGGESTED_TOPICS = [
   '四代EGFR抑制剂竞争格局',
@@ -11,88 +13,226 @@ const SUGGESTED_TOPICS = [
   'ALK 耐药突变谱汇总',
 ]
 
-const AGENT_CARDS = [
-  { id: 1, color: '#fff3e0', emoji: '📊' },
-  { id: 2, color: '#e8f4fd', emoji: '🖥️' },
-  { id: 3, color: '#e8f0fe', emoji: '📈' },
-]
+interface DisplayMessage {
+  role: 'user' | 'assistant'
+  content: string
+  streaming?: boolean
+}
 
 export default function Home() {
-  const [inputValue, setInputValue] = useState('')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const [activeSession, setActiveSession] = useState<Session | null>(null)
+  const [messages, setMessages] = useState<DisplayMessage[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
 
-  const handleTopicClick = (topic: string) => {
-    setInputValue(topic)
+  // Load sessions when drawer opens
+  useEffect(() => {
+    if (!drawerOpen) return
+    setLoadingSessions(true)
+    chatApi.listSessions()
+      .then(setSessions)
+      .catch(() => null)
+      .finally(() => setLoadingSessions(false))
+  }, [drawerOpen])
+
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const switchSession = async (session: Session) => {
+    setActiveSession(session)
+    setMessages([])
+    setLoadingHistory(true)
+    try {
+      const detail = await chatApi.getSession(session.id)
+      setMessages(detail.messages.map((m: Message) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })))
+    } catch {
+      message.error('加载会话历史失败')
+    } finally {
+      setLoadingHistory(false)
+    }
   }
+
+  const handleSend = async () => {
+    const content = input.trim()
+    if (!content || sending) return
+
+    setInput('')
+    setSending(true)
+
+    // Create session lazily on first send
+    let session = activeSession
+    const isFirstMessage = messages.length === 0
+    if (!session) {
+      try {
+        session = await chatApi.createSession()
+        setActiveSession(session)
+        setSessions((prev) => [session!, ...prev])
+      } catch {
+        message.error('创建会话失败')
+        setSending(false)
+        return
+      }
+    }
+
+    // Append user message immediately
+    setMessages((prev) => [...prev, { role: 'user', content }])
+
+    // Placeholder for assistant streaming
+    setMessages((prev) => [...prev, { role: 'assistant', content: '', streaming: true }])
+
+    try {
+      let full = ''
+      for await (const delta of chatApi.streamChat(session.id, content)) {
+        full += delta
+        setMessages((prev) => {
+          const next = [...prev]
+          next[next.length - 1] = { role: 'assistant', content: full, streaming: true }
+          return next
+        })
+      }
+      // Mark streaming done
+      setMessages((prev) => {
+        const next = [...prev]
+        next[next.length - 1] = { role: 'assistant', content: full }
+        return next
+      })
+      // After first message, generate a title in the background
+      if (isFirstMessage) {
+        chatApi.generateTitle(session.id)
+          .then((updated) => {
+            setActiveSession(updated)
+            setSessions((prev) => prev.map((s) => s.id === updated.id ? updated : s))
+          })
+          .catch(() => null)
+      }
+    } catch {
+      message.error('发送失败，请重试')
+      setMessages((prev) => prev.slice(0, -1)) // remove empty assistant bubble
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const showWelcome = messages.length === 0
 
   return (
     <div style={styles.layout}>
       <Sidebar />
 
       <main style={styles.main}>
-        {/* Center content */}
-        <div style={styles.center}>
-          {/* Purple orb */}
-          <div style={styles.orb} />
+        {/* Session button — top right */}
+        <div style={styles.topBar}>
+          <Button
+            icon={<MessageOutlined />}
+            onClick={() => setDrawerOpen(true)}
+          >
+            会话
+          </Button>
+        </div>
 
-          <h1 style={styles.title}>药物研发 Agent 工作台</h1>
+        {/* Welcome / message list */}
+        <div style={styles.chatArea}>
+          {showWelcome ? (
+            <div style={styles.welcome}>
+              <div style={styles.orb} />
+              <h1 style={styles.title}>Agent 工作台</h1>
+              <div style={styles.topics}>
+                {SUGGESTED_TOPICS.map((topic) => (
+                  <Button
+                    key={topic}
+                    size="small"
+                    style={styles.topicBtn}
+                    onClick={() => setInput(topic)}
+                  >
+                    {topic}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={styles.messageList}>
+              {loadingHistory ? (
+                <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+              ) : (
+                messages.map((msg, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <div style={msg.role === 'user' ? styles.userBubble : styles.assistantBubble}>
+                      <Typography.Text style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {msg.content}
+                        {msg.streaming && <span style={styles.cursor}>▋</span>}
+                      </Typography.Text>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
 
-          {/* Chat input */}
+        {/* Input area */}
+        <div style={styles.inputWrapper}>
           <div style={styles.inputBox}>
             <Input.TextArea
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="询问任何问题，创造任何事物..."
-              autoSize={{ minRows: 1, maxRows: 4 }}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="输入消息，按 Enter 发送..."
+              autoSize={{ minRows: 1, maxRows: 5 }}
               bordered={false}
+              disabled={sending}
               style={styles.textarea}
+              onPressEnter={(e) => {
+                if (!e.shiftKey) {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
             />
             <div style={styles.inputFooter}>
-              <Select
-                defaultValue="快速问答"
-                bordered={false}
-                style={{ width: 110, color: '#555' }}
-                options={[{ value: '快速问答', label: '快速问答' }]}
-              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Shift+Enter 换行
+              </Typography.Text>
               <Button
                 type="primary"
                 shape="circle"
-                icon={<ArrowUpOutlined />}
-                disabled={!inputValue.trim()}
+                icon={sending ? <Spin size="small" /> : <ArrowUpOutlined />}
+                disabled={!input.trim() || sending}
+                onClick={handleSend}
               />
             </div>
           </div>
-
-          {/* Suggested topics */}
-          <div style={styles.topics}>
-            {SUGGESTED_TOPICS.map((topic) => (
-              <Tag
-                key={topic}
-                style={styles.topic}
-                onClick={() => handleTopicClick(topic)}
-              >
-                {topic}
-              </Tag>
-            ))}
-          </div>
-        </div>
-
-        {/* Agents section */}
-        <div style={styles.agentsSection}>
-          <div style={styles.agentsHeader}>
-            <span style={styles.agentsTitle}>Agents</span>
-            <Button type="link" style={{ padding: 0, fontSize: 13, color: '#8c8c8c' }}>
-              更多 &gt;
-            </Button>
-          </div>
-          <div style={styles.agentCards}>
-            {AGENT_CARDS.map((card) => (
-              <div key={card.id} style={{ ...styles.agentCard, background: card.color }}>
-                <span style={{ fontSize: 32 }}>{card.emoji}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </main>
+
+      <SessionDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        sessions={sessions}
+        loading={loadingSessions}
+        activeSessionId={activeSession?.id ?? null}
+        onSelect={switchSession}
+        onNewSession={() => {
+          setActiveSession(null)
+          setMessages([])
+        }}
+        onDeleted={(id) => {
+          setSessions((prev) => prev.filter((s) => s.id !== id))
+          if (activeSession?.id === id) {
+            setActiveSession(null)
+            setMessages([])
+          }
+        }}
+      />
     </div>
   )
 }
@@ -108,17 +248,27 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    padding: '0 40px 40px',
-    minHeight: '100vh',
+    height: '100vh',
+    overflow: 'hidden',
   },
-  center: {
+  topBar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    padding: '12px 24px',
+    borderBottom: '1px solid #f0f0f0',
+    background: '#fff',
+    flexShrink: 0,
+  },
+  chatArea: {
+    flex: 1,
+    overflow: 'auto',
+    padding: '0 24px',
+  },
+  welcome: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     paddingTop: 80,
-    width: '100%',
-    maxWidth: 640,
   },
   orb: {
     width: 80,
@@ -132,16 +282,64 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 24,
     fontWeight: 600,
     color: '#1a1a1a',
-    marginBottom: 28,
+    marginBottom: 16,
     textAlign: 'center',
   },
-  inputBox: {
+  topics: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  topicBtn: {
+    borderRadius: 16,
+    fontSize: 13,
+    color: '#555',
+  },
+  messageList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
+    padding: '24px 0',
+    maxWidth: 760,
+    margin: '0 auto',
     width: '100%',
+  },
+  userBubble: {
+    background: '#1677ff',
+    color: '#fff',
+    borderRadius: '16px 16px 4px 16px',
+    padding: '10px 14px',
+    maxWidth: '70%',
+  },
+  assistantBubble: {
+    background: '#fff',
+    border: '1px solid #f0f0f0',
+    borderRadius: '16px 16px 16px 4px',
+    padding: '10px 14px',
+    maxWidth: '70%',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+  },
+  cursor: {
+    display: 'inline-block',
+    animation: 'blink 1s step-end infinite',
+    marginLeft: 2,
+    color: '#1677ff',
+  },
+  inputWrapper: {
+    padding: '12px 24px 20px',
+    background: '#fafafa',
+    flexShrink: 0,
+  },
+  inputBox: {
     background: '#fff',
     border: '1px solid #e5e7eb',
     borderRadius: 12,
     padding: '12px 16px 8px',
     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    maxWidth: 760,
+    margin: '0 auto',
   },
   textarea: {
     fontSize: 15,
@@ -153,52 +351,5 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 8,
-  },
-  topics: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 20,
-    justifyContent: 'center',
-  },
-  topic: {
-    cursor: 'pointer',
-    padding: '4px 10px',
-    borderRadius: 16,
-    fontSize: 13,
-    color: '#555',
-    border: '1px solid #e5e7eb',
-    background: '#fff',
-    userSelect: 'none',
-  },
-  agentsSection: {
-    width: '100%',
-    maxWidth: 800,
-    marginTop: 48,
-  },
-  agentsHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  agentsTitle: {
-    fontSize: 16,
-    fontWeight: 600,
-    color: '#1a1a1a',
-  },
-  agentCards: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: 16,
-  },
-  agentCard: {
-    borderRadius: 12,
-    height: 120,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    transition: 'transform 0.2s',
   },
 }

@@ -1,6 +1,6 @@
 # Beryl UI
 
-药物研发 Agent 工作台前端。
+Agent 工作台前端。
 
 ---
 

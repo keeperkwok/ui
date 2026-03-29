@@ -56,7 +56,7 @@ export default function Login() {
         {/* Logo & Title */}
         <div style={styles.header}>
           <div style={styles.logoPlaceholder} />
-          <h1 style={styles.title}>药物研发 Agent 工作台</h1>
+          <h1 style={styles.title}>Agent 工作台</h1>
         </div>
 
         <Tabs
