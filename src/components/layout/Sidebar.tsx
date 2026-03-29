@@ -4,6 +4,7 @@ import { Avatar, Dropdown } from 'antd'
 import { HomeOutlined, RobotOutlined, LogoutOutlined } from '@ant-design/icons'
 import { authApi, type UserInfo } from '@/services/auth'
 import { token } from '@/utils/token'
+import BeeIcon from '@/components/BeeIcon'
 
 export default function Sidebar() {
   const navigate = useNavigate()
@@ -34,7 +35,7 @@ export default function Sidebar() {
     <div style={styles.sidebar}>
       {/* Brand icon */}
       <div style={styles.brand}>
-        <div style={styles.brandDot} />
+        <BeeIcon size={32} />
       </div>
 
       {/* Nav items */}
@@ -46,7 +47,7 @@ export default function Sidebar() {
               ...styles.navItem,
               ...(location.pathname === item.key ? styles.navItemActive : {}),
             }}
-            onClick={() => navigate(item.key)}
+            onClick={() => navigate(item.key, { state: { newSession: Date.now() } })}
           >
             <span style={styles.navIcon}>{item.icon}</span>
             <span style={styles.navLabel}>{item.label}</span>
@@ -111,12 +112,6 @@ const styles: Record<string, React.CSSProperties> = {
   brand: {
     marginBottom: 24,
     padding: 8,
-  },
-  brandDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   },
   nav: {
     flex: 1,

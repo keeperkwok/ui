@@ -13,3 +13,20 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+@keyframes dotBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Markdown bubble resets */
+.md-body p { margin: 0 0 8px; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body h1, .md-body h2, .md-body h3 { margin: 12px 0 6px; font-weight: 600; }
+.md-body ul, .md-body ol { padding-left: 20px; margin: 6px 0; }
+.md-body li { margin: 2px 0; }
+.md-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+.md-body th, .md-body td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
+.md-body th { background: #f9fafb; font-weight: 600; }
+.md-body blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding-left: 12px; color: #6b7280; }
+.md-body hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }

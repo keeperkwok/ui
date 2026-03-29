@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button, Form, Input, Tabs, message } from 'antd'
 import { authApi } from '@/services/auth'
 import { token } from '@/utils/token'
+import BeeIcon from '@/components/BeeIcon'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -55,7 +56,7 @@ export default function Login() {
       <div style={styles.card}>
         {/* Logo & Title */}
         <div style={styles.header}>
-          <div style={styles.logoPlaceholder} />
+          <div style={styles.logoWrap}><BeeIcon size={56} /></div>
           <h1 style={styles.title}>Agent 工作台</h1>
         </div>
 
@@ -167,12 +168,9 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: 'center',
     marginBottom: 8,
   },
-  logoPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+  logoWrap: {
     margin: '0 auto 16px',
+    filter: 'drop-shadow(0 4px 12px rgba(251,191,36,0.4))',
   },
   title: {
     fontSize: 22,

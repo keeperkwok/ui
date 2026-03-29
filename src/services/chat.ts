@@ -22,6 +22,9 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at: string
+  token_count?: number | null
+  duration_ms?: number | null
+  ttf_ms?: number | null
 }
 
 export interface SessionDetail extends Session {
@@ -44,8 +47,12 @@ export const chatApi = {
   generateTitle: (sessionId: string) =>
     chatHttp.post<Session>(`/api/v1/sessions/${sessionId}/generate-title`).then((r) => r.data),
 
-  /** SSE streaming chat — returns an async generator of delta strings */
-  async *streamChat(sessionId: string, content: string): AsyncGenerator<string> {
+  /** SSE streaming chat — yields delta strings; calls onMeta with final stats */
+  async *streamChat(
+    sessionId: string,
+    content: string,
+    onMeta?: (meta: { tokenCount: number | null; durationMs: number | null; ttfMs: number | null }) => void,
+  ): AsyncGenerator<string> {
     const accessToken = token.getAccess()
     const resp = await fetch(`${CHAT_BASE}/api/v1/chat/${sessionId}`, {
       method: 'POST',
@@ -77,8 +84,15 @@ export const chatApi = {
         const raw = line.slice(5).trim()
         if (raw === '[DONE]') return
         try {
-          const parsed = JSON.parse(raw) as { delta?: string; error?: string }
+          const parsed = JSON.parse(raw) as {
+            delta?: string
+            error?: string
+            meta?: { token_count: number | null; duration_ms: number | null; ttf_ms: number | null }
+          }
           if (parsed.error) throw new Error(parsed.error)
+          if (parsed.meta && onMeta) {
+            onMeta({ tokenCount: parsed.meta.token_count, durationMs: parsed.meta.duration_ms, ttfMs: parsed.meta.ttf_ms })
+          }
           if (parsed.delta) yield parsed.delta
         } catch {
           // ignore malformed lines
